@@ -1,8 +1,6 @@
 name: VD Scanner tools Delivery
 
-# Controls when the action will run.
 on:
-  # Trigger when a pull request is merged into main
   push:
     branches:
       - main
@@ -12,11 +10,8 @@ on:
       - "src/wazuh_modules/vulnerability_scanner/include/**"
       - ".github/workflows/4_builderprecompiled_vdscanner-testtools.yml"
       - "src/wazuh_modules/vulnerability_scanner/schemas/**"
-
-  # Allows manual trigger.
   workflow_dispatch:
 
-# Ensures only one instance of this workflow is running per PR
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
 
@@ -27,8 +22,6 @@ env:
 jobs:
   build:
     name: VD Scanner Tools Delivery
-
-    # Runs only if the PR status is different to Draft
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-22.04
     timeout-minutes: 60
@@ -47,32 +40,26 @@ jobs:
 
       - name: Project dependencies
         uses: ./.github/actions/vulnerability_scanner_deps
-        with:
-          test: "false"
 
       - name: Router
         uses: ./.github/actions/compile_and_test
         with:
           path: src/shared_modules/router
-          test: "false"
 
       - name: Indexer connector
         uses: ./.github/actions/compile_and_test
         with:
           path: src/shared_modules/indexer_connector
-          test: "false"
 
       - name: Content manager
         uses: ./.github/actions/compile_and_test
         with:
           path: src/shared_modules/content_manager
-          test: "false"
 
       - name: Vulnerability scanner
         uses: ./.github/actions/compile_and_test
         with:
           path: src/wazuh_modules/vulnerability_scanner
-          test: "false"
 
       - name: Prepare vdscanner tools
         run: |
@@ -112,7 +99,6 @@ jobs:
             exit 1
           fi
 
-      # Upload vdscanner tools
       - name: Upload vdscanner tools
         if: ${{ success() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
         uses: actions/upload-artifact@v4
