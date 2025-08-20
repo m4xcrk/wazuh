@@ -10,6 +10,7 @@
 #include <api/archiver/handlers.hpp>
 #include <api/catalog/catalog.hpp>
 #include <api/handlers.hpp>
+#include <api/event/ndJsonParser.hpp>
 #include <api/policy/policy.hpp>
 #include <archiver/archiver.hpp>
 #include <base/eventParser.hpp>
@@ -52,14 +53,14 @@ struct QueueTraits : public moodycamel::ConcurrentQueueDefaultTraits
 };
 } // namespace
 
-std::shared_ptr<udsrv::Server> g_engineServer {};
+std::shared_ptr<udsrv::Server> g_engineLocalServer {};
 
 void sigintHandler(const int signum)
 {
-    if (g_engineServer)
+    if (g_engineLocalServer)
     {
-        g_engineServer->stop();
-        LOG_INFO("Received signal {}: Stopping the engine server.", signum);
+        g_engineLocalServer->stop();
+        LOG_INFO("Received signal {}: Stopping the engine local server.", signum);
     }
 }
 
@@ -127,7 +128,7 @@ int main(int argc, char* argv[])
 
     // Load the configuration
 
-    auto confManager = conf::Conf(std::make_shared<conf::ApiLoader>());
+    auto confManager = conf::Conf(std::make_shared<conf::FileLoader>());
     try
     {
         confManager.load();
@@ -174,10 +175,12 @@ int main(int argc, char* argv[])
     // std::shared_ptr<IIndexerConnector> iConnector;
     std::shared_ptr<httpsrv::Server> apiServer;
     std::shared_ptr<archiver::Archiver> archiver;
+    std::shared_ptr<httpsrv::Server> engineRemoteServer;
 
     try
     {
         // Changing user and group
+        if (!confManager.get<bool>(conf::key::SKIP_USER_CHANGE))
         {
             /* Check if the user/group given are valid */
             const auto user = confManager.get<std::string>(conf::key::USER);
@@ -541,14 +544,31 @@ int main(int argc, char* argv[])
             apiServer->start(confManager.get<std::string>(conf::key::SERVER_API_SOCKET));
         }
 
-        // Server
+        // UDP Servers
         {
-            g_engineServer =
+            g_engineLocalServer =
                 std::make_shared<udsrv::Server>([orchestrator, archiver](std::string_view msg)
                                                 { orchestrator->postEvent(base::eventParsers::parseLegacyEvent(msg)); },
                                                 confManager.get<std::string>(conf::key::SERVER_EVENT_SOCKET));
-            g_engineServer->start(confManager.get<int>(conf::key::SERVER_EVENT_THREADS));
-            LOG_INFO("Engine initialized and started.");
+            g_engineLocalServer->start(confManager.get<int>(conf::key::SERVER_EVENT_THREADS));
+
+            LOG_INFO("Local engine's server initialized and started.");
+        }
+
+        // HTTP enriched events server
+        {
+            engineRemoteServer = std::make_shared<httpsrv::Server>("ENRICHED_EVENTS_SRV");
+
+            exitHandler.add([engineRemoteServer]() { engineRemoteServer->stop(); });
+
+            engineRemoteServer->addRoute(httpsrv::Method::POST,
+                "/events/enriched", //TODO: Double check route
+                api::event::handlers::pushEvent(orchestrator, api::event::protocol::getNDJsonParser(), archiver));
+
+            // starting in a new thread
+            engineRemoteServer->start(confManager.get<std::string>(conf::key::SERVER_ENRICHED_EVENTS_SOCKET));
+
+            LOG_INFO("Remote engine's server initialized and started.");
         }
 
         /* Create PID file */
@@ -563,7 +583,7 @@ int main(int argc, char* argv[])
         }
 
         // Do not exit until the server is running
-        while (g_engineServer->isRunning())
+        while (g_engineLocalServer->isRunning())
         {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
