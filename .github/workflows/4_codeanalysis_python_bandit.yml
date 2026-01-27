@@ -5,12 +5,8 @@ on:
   schedule:
     - cron: '0 10 * * 2'
 
-env:
-  PYTHON_DIRS: .
-
 jobs:
   pick-branches:
-    name: Get branches to analyze
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
@@ -37,7 +33,6 @@ jobs:
           echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
 
   bandit:
-    name: Bandit scan
     needs: pick-branches
     runs-on: ubuntu-24.04
 
@@ -54,6 +49,7 @@ jobs:
         with:
           ref: ${{ matrix.ref }}
           fetch-depth: 0
+          submodules: recursive
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -62,16 +58,16 @@ jobs:
 
       - name: Install Bandit
         run: |
-          pip install --upgrade pip
+          python -m pip install --upgrade pip
           pip install bandit[sarif]
 
-      - name: Run Bandit (SARIF)
+      - name: Run Bandit (force SARIF)
         run: |
-          bandit -r $PYTHON_DIRS \
+          bandit -r . \
             -x .git,__pycache__,*/test_*,*/test/*,*/tests/*,*/testing/* \
             -f sarif \
             -o bandit.sarif \
-            || true
+            --exit-zero
 
       - name: Upload SARIF
         uses: github/codeql-action/upload-sarif@v4
